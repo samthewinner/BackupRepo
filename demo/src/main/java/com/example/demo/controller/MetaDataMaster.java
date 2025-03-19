@@ -1,9 +1,13 @@
 package com.example.demo.controller;
 
 import com.example.demo.model.Subscriber;
-import com.example.demo.model.Topic;
+
+import com.example.demo.model.NotificationTopic;
 import com.example.demo.repository.SubscriberRepository;
 import com.example.demo.repository.TopicRepository;
+//import com.example.demo.repository.IgniteThinClientConfig;
+
+import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.Ignition;
@@ -12,7 +16,11 @@ import org.apache.ignite.client.IgniteClient;
 import org.apache.ignite.cluster.ClusterGroup;
 import org.apache.ignite.cluster.ClusterMetrics;
 import org.apache.ignite.cluster.ClusterNode;
+import org.apache.ignite.configuration.ClientConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -21,21 +29,39 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+
 
 @RestController()
 @RequestMapping("/api")
 public class MetaDataMaster {
 
-    private final String cacheName = "c1";
+//    @Bean
+//    public ClientConfiguration clientConfiguration() {
+//        // If you provide a whole ClientConfiguration bean then configuration properties will not be used.
+//        ClientConfiguration cfg = new ClientConfiguration();
+//        cfg.setAddresses("127.0.0.1:10800");
+//        return cfg;
+//    }
 
-    @Autowired
+    @Value("${ignite.cache.name}")
+    private String cacheName ;
+
     private IgniteClient igniteClient;
+
+
+    public MetaDataMaster(IgniteClient igniteClient){
+        this.igniteClient = igniteClient;
+    }
 
     private IgniteCache<Integer, String> cache;
 
     @Autowired(required = false)
-    private Topic topic;
+    private NotificationTopic NotificationTopic;
 
     @Autowired(required = false)
     private Subscriber subscriber;
@@ -85,15 +111,16 @@ public class MetaDataMaster {
     }
 
     @GetMapping("/internal/getAllTopics")
-    public  ResponseEntity<List<Topic>> getAllTopics(){
+    public  ResponseEntity<List<NotificationTopic>> getAllTopics(){
         return new ResponseEntity<>(topicRepository.findAll(),HttpStatus.OK);
     }
 
     @GetMapping("/getSubscribers")
-    public ResponseEntity<List<Long>> getSubscribers(@RequestParam String topicName){
+    public ResponseEntity<Map<String, Object>> getSubscribers(@RequestParam String topicName){
+        System.out.println("Received: "+topicName);
         //find in cache first
-        ClientCache<String,Topic> cache = igniteClient.cache("cacheName");
-        Topic topic1 = cache.get(topicName);
+        ClientCache<String,NotificationTopic> cache = igniteClient.cache(cacheName);
+        NotificationTopic topic1 = cache.get(topicName);
         if(topic1 == null)
         {
             System.out.println("Querying database");
@@ -101,17 +128,27 @@ public class MetaDataMaster {
            topic1 =  topicRepository.findByName(topicName);
            //not present
            if(null == topic1)
-                return new ResponseEntity<>(null,HttpStatus.CONFLICT);
+           {
+               System.out.println("Not present in db");
+               return new ResponseEntity<>(null,HttpStatus.CONFLICT);
+           }
+            System.out.println(topic1.getSubscribersIds());
+           cache.put(topicName,topic1);
 
         }
-        return new ResponseEntity<>(topic1.getSubscribersIds(),HttpStatus.OK);
+
+        Map<String,Object> res = new HashMap<>();
+
+        res.put("subscribers",topic1.getSubscribersIds());
+
+        return new ResponseEntity<>(res,HttpStatus.OK);
 
     }
 
     @PostMapping("/createTopic")
-    public ResponseEntity<String> createTopic(@RequestBody Topic newTopic){
-        ClientCache<String,Topic> cache = igniteClient.cache(cacheName);
-        Topic topic1 = cache.get(newTopic.getName());
+    public ResponseEntity<String> createTopic(@RequestBody NotificationTopic newTopic){
+        ClientCache<String,NotificationTopic> cache = igniteClient.cache(cacheName);
+        NotificationTopic topic1 = cache.get(newTopic.getName());
         if(null == topic1)
         {
             //look in db
@@ -145,8 +182,8 @@ public class MetaDataMaster {
 
     @PostMapping("/subscribe")
     public ResponseEntity<String> subscribe(@RequestParam String currTopic , @RequestParam Long subscriberId ){
-        ClientCache<String,Topic> cache = igniteClient.cache(cacheName);
-        Topic topic1 = cache.get(currTopic);
+        ClientCache<String,NotificationTopic> cache = igniteClient.cache(cacheName);
+        NotificationTopic topic1 = cache.get(currTopic);
 
         if(null == topic1){
             topic1 =  topicRepository.findByName(currTopic);

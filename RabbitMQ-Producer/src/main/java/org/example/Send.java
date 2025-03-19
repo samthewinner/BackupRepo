@@ -18,7 +18,7 @@ public class Send {
 
             channel.queueDeclare(TASK_QUEUE_NAME, true, false, false, null);
 
-            String message = "HI! .. this is a message..";
+            String message = "HI! .. Second..";
 
             channel.basicPublish("", TASK_QUEUE_NAME,
                     MessageProperties.PERSISTENT_TEXT_PLAIN,
